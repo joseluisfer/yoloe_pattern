@@ -1,9 +1,21 @@
+# --- Núcleo de Ejecución ---
 runpod
 ultralytics>=8.3.40
-pillow
-numpy
+numpy>=1.23.5
+Pillow>=10.0.0
+
+# --- Motor de IA y Visión ---
 torch
 torchvision
+torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# --- Procesamiento de Contornos y Geometría ---
 opencv-python-headless
-# ESTAS SON LAS QUE FALTAN:
+
+# --- Modelos de Lenguaje-Visión (Indispensable para Visual Prompting) ---
+# Instalación directa desde el repositorio oficial de OpenAI
 git+https://github.com/openai/CLIP.git
+
+# --- Utilidades Extra ---
+requests
+pyyaml
