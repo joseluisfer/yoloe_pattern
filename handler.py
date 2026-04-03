@@ -5,65 +5,90 @@ import numpy as np
 from PIL import Image
 import io
 import base64
+import cv2
 
-# 1. CARGA DEL MODELO (Fuera del handler para evitar recargar en cada petición)
-print("Iniciando carga del modelo YOLOE-26x-seg en GPU...")
+# --- 1. CARGA GLOBAL DEL MODELO ---
+print("🚀 Iniciando YOLOE-26x-seg (Visual Prompting Mode)...")
 try:
-    # Forzamos el uso de GPU si está disponible
-    device = "0" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # Cargamos el modelo X (Extra Large) que es el más potente para segmentación
     model = YOLOE("yoloe-26x-seg.pt").to(device)
-    print(f"✅ Modelo listo en dispositivo: {device}")
+    print(f"✅ Modelo cargado en: {device}")
 except Exception as e:
-    print(f"❌ Error cargando el modelo: {e}")
+    print(f"❌ Error crítico en carga de modelo: {e}")
+
+def decode_base64_to_image(b64_str):
+    """Limpia y decodifica el string base64 a una imagen PIL"""
+    if "," in b64_str:
+        b64_str = b64_str.split(",")[1]
+    img_bytes = base64.b64decode(b64_str)
+    return Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
 def handler(job):
     """
-    Función que RunPod ejecuta automáticamente al recibir un JSON
+    Handler para detección por patrón visual y segmentación de contornos
     """
     try:
-        # 2. Extraer datos del JSON de entrada
         job_input = job.get("input", {})
-        image_b64 = job_input.get("file")
-        text_prompt = job_input.get("text_prompt", "objeto")
-
-        if not image_b64:
-            return {"error": "No se proporcionó el campo 'file' en base64"}
-
-        # 3. Decodificar imagen Base64 a PIL -> Numpy
-        if "," in image_b64:
-            image_b64 = image_b64.split(",")[1]
         
-        image_bytes = base64.b64decode(image_b64)
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        img_array = np.array(img)
+        # Extraer imagen principal y el patrón (crop)
+        scene_b64 = job_input.get("file")      # La foto de la escena
+        pattern_b64 = job_input.get("pattern") # La foto del objeto a buscar
+        conf_threshold = job_input.get("threshold", 0.25)
 
-        # 4. Configurar YOLOE (Dynamic Vocabulary)
-        classes = [c.strip() for c in text_prompt.split(",")]
-        model.set_classes(classes)
+        if not scene_b64 or not pattern_b64:
+            return {"error": "Se requieren los campos 'file' y 'pattern' en base64"}
 
-        # 5. Inferencia
-        results = model.predict(img_array, verbose=False)
-        
-        # 6. Formatear respuesta JSON
+        # 2. Decodificar imágenes
+        img_scene = decode_base64_to_image(scene_b64)
+        img_pattern = decode_base64_to_image(pattern_b64)
+
+        # 3. Inferencia con Visual Prompt
+        # En YOLOE-26x, pasamos el patrón directamente en el argumento 'visual_prompt'
+        results = model.predict(
+            source=img_scene, 
+            visual_prompt=img_pattern, 
+            conf=conf_threshold,
+            verbose=False
+        )
+
         detections = []
         if results and len(results) > 0:
             res = results[0]
+            
+            # 4. Procesar Boxes y Segmentación (Contornos)
             if res.boxes:
                 boxes = res.boxes.xyxy.cpu().numpy()
                 confs = res.boxes.conf.cpu().numpy()
-                cls_ids = res.boxes.cls.cpu().numpy().astype(int)
                 
+                # Extraer máscaras si existen (YOLOE-seg)
+                masks = res.masks.xy if res.masks is not None else [None] * len(boxes)
+
                 for i in range(len(boxes)):
+                    # Simplificación del contorno para aligerar el JSON
+                    contour_data = []
+                    if masks[i] is not None:
+                        # Reducimos puntos con approxPolyDP para eficiencia en Android
+                        points = masks[i].astype(np.float32)
+                        epsilon = 0.001 * cv2.arcLength(points, True)
+                        approx = cv2.approxPolyDP(points, epsilon, True)
+                        contour_data = [{"x": round(float(p[0][0]), 2), "y": round(float(p[0][1]), 2)} for p in approx]
+
                     detections.append({
-                        "class": classes[cls_ids[i]] if cls_ids[i] < len(classes) else "unknown",
+                        "bbox": [round(float(x), 2) for x in boxes[i].tolist()],
                         "confidence": round(float(confs[i]), 4),
-                        "bbox": [round(float(x), 2) for x in boxes[i].tolist()]
+                        "contour": contour_data
                     })
 
-        return {"detections": detections}
+        return {
+            "status": "success",
+            "total": len(detections),
+            "detections": detections
+        }
 
     except Exception as e:
-        return {"error": f"Error durante el procesamiento: {str(e)}"}
+        return {"error": f"Fallo en el worker: {str(e)}"}
 
-# 7. INICIAR EL WORKER
-runpod.serverless.start({"handler": handler})
+# --- 5. INICIAR WORKER ---
+if __name__ == "__main__":
+    runpod.serverless.start({"handler": handler})
