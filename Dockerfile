@@ -1,31 +1,31 @@
-FROM python:3.10-slim-bookworm
+# 1. Imagen base con CUDA 12.1 (Imprescindible para YOLOE-26x y CLIP en GPU)
+FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
 
-# Añadimos 'git' a la lista de instalación
+# 2. Variables de entorno
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# 3. Dependencias de sistema (Añadimos git para que pip pueda bajar CLIP)
 RUN apt-get update && apt-get install -y \
     wget \
     git \
-    libgl1 \
     libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
-# Dependencias de sistema para OpenCV y Wget
-RUN apt-get update && apt-get install -y \
-    wget \
-    libgl1 \
-    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# 4. Copiar e instalar requerimientos
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Descargar el modelo v8.4.0
+# 5. Descargar el modelo v26x-seg (Asegúrate de que la URL sea válida)
 RUN wget -q https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26x-seg.pt -O yoloe-26x-seg.pt
 
+# 6. Copiar el código del handler
 COPY handler.py .
 
-# En Serverless no necesitas EXPOSE 8000, 
-# la comunicación es interna vía la librería runpod.
-
-# Ejecución directa del worker
+# 7. Ejecutar el worker de RunPod
 CMD ["python", "-u", "handler.py"]
