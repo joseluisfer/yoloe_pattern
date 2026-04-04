@@ -1,7 +1,7 @@
-numpy<2.0.0
 runpod
-Pillow>=10.0.0
-ultralytics>=8.3.40
+ultralytics>=8.3.40,<9.0.0
+numpy==1.26.4
+pillow
+torch==2.0.1
+torchvision==0.15.2
 opencv-python-headless
-torch
-torchvision
