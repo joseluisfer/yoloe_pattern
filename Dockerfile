@@ -1,21 +1,14 @@
-# Usar una imagen base ligera con Python
-FROM python:3.10-slim
+# Usamos la imagen oficial que ya tiene Python, PyTorch y OpenCV configurados
+FROM ultralytics/ultralytics:latest
 
-# Instalar dependencias del sistema para OpenCV
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+# Instalamos runpod para el servidor serverless
+RUN pip install --no-cache-dir runpod
 
-# Definir el directorio de trabajo
-WORKDIR /
+# Descargamos el modelo específico para que ya esté dentro de la imagen (más rápido al arrancar)
+RUN curl -L https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26x-seg.pt -o /yoloe-26x-seg.pt
 
-# Copiar los archivos de requisitos e instalarlos
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copiamos el handler
+COPY handler.py /handler.py
 
-# Copiar el handler
-COPY handler.py .
-
-# Comando para ejecutar el handler al iniciar el contenedor
+# Ejecutamos el handler
 CMD [ "python", "-u", "/handler.py" ]
