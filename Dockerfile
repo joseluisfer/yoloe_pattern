@@ -1,26 +1,22 @@
 FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
 
-# 1. ESTO ES LO QUE FALTA (Dependencias de sistema)
+# Instalamos lo mínimo indispensable
 RUN apt-get update && apt-get install -y \
     wget \
     git \
-    libgl1 \
     libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 2. Instalación de Python
 COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# 3. Descarga del modelo
+# Descarga del modelo
 RUN wget -q https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26x-seg.pt -O yoloe-26x-seg.pt
 
 COPY handler.py .
