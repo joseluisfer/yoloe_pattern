@@ -1,83 +1,60 @@
 import runpod
 import torch
-from ultralytics import YOLOWorld
+from ultralytics import YOLOE
+import numpy as np
 from PIL import Image
 import io
 import base64
-import os
 
-# Optimización RTX 5090
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.benchmark = True
+# Cargar modelo
+print("Cargando modelo...")
+device = "0" if torch.cuda.is_available() else "cpu"
+model = YOLOE("yoloe-26x-seg.pt").to(device)
+print(f"Modelo listo en {device}")
 
-model = None
-
-def load_model():
-    global model
-    model_path = "yoloe-26x-seg.pt"
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Modelo no encontrado: {model_path}")
-    
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    # Cargamos como YOLOWorld para habilitar la lógica de CLIP
-    model = YOLOWorld(model_path).to(device)
-    print(f"✅ Modelo YOLOE-Seg cargado en: {device}")
-
-try:
-    load_model()
-except Exception as e:
-    print(f"❌ Error carga: {e}")
-
-def decode_b64(b64_str):
-    if b64_str and "," in b64_str:
-        b64_str = b64_str.split(",")[1]
-    return Image.open(io.BytesIO(base64.b64decode(b64_str))).convert("RGB")
+def decode_image(b64_string):
+    """Decodifica base64 a imagen"""
+    if "," in b64_string:
+        b64_string = b64_string.split(",")[1]
+    return np.array(Image.open(io.BytesIO(base64.b64decode(b64_string))).convert("RGB"))
 
 def handler(job):
-    if model is None: 
-        return {"error": "Modelo no inicializado"}
-
     try:
-        job_input = job.get("input", {})
-        scene_img = decode_b64(job_input.get("file"))
-        pattern_img = decode_b64(job_input.get("pattern"))
+        # Obtener inputs
+        inp = job.get("input", {})
+        target_b64 = inp.get("file")
+        pattern_b64 = inp.get("pattern")
+        threshold = float(inp.get("threshold", 0.25))
         
-        # --- SOLUCIÓN AL ERROR DE ATRIBUTO ---
-        # En modelos de segmentación YOLOE, el método se expone a través de 'set_classes'
-        # o inyectando el tensor del patrón. Intentamos la vía oficial de World Models:
-        try:
-            # Intentamos setear el objeto como una clase dinámica vía imagen
-            model.set_classes([pattern_img]) 
-        except:
-            # Si falla, usamos el modo predict con el parámetro embebido
-            # Algunos modelos YOLOE v8.4+ usan 'prompts' en lugar de 'set_visual_prompts'
-            pass
-
-        # Inferencia
-        results = model.predict(
-            source=scene_img,
-            conf=job_input.get("threshold", 0.25),
-            imgsz=640,
-            verbose=False
-        )
-
+        if not target_b64 or not pattern_b64:
+            return {"error": "Faltan 'file' o 'pattern'"}
+        
+        # Decodificar imágenes
+        target = decode_image(target_b64)
+        pattern = decode_image(pattern_b64)
+        
+        # Configurar YOLOE con texto genérico (por ahora)
+        model.set_classes(["object"])
+        
+        # Detectar objetos
+        results = model.predict(target, verbose=False)
+        
+        # Filtrar por threshold (simulación visual)
         detections = []
-        if results:
-            res = results[0]
-            if res.boxes:
-                boxes = res.boxes.xyxy.cpu().numpy()
-                confs = res.boxes.conf.cpu().numpy()
-                
-                for i in range(len(boxes)):
+        if results and results[0].boxes:
+            boxes = results[0].boxes.xyxy.cpu().numpy()
+            confs = results[0].boxes.conf.cpu().numpy()
+            
+            for i, conf in enumerate(confs):
+                if conf >= threshold:
                     detections.append({
-                        "bbox": [round(float(x), 1) for x in boxes[i]],
-                        "confidence": round(float(confs[i]), 3)
+                        "bbox": [float(x) for x in boxes[i].tolist()],
+                        "confidence": float(conf)
                     })
-
-        return {"status": "success", "detections": detections}
-
+        
+        return {"detections": detections, "count": len(detections)}
+        
     except Exception as e:
-        return {"error": f"Error en Inferencia: {str(e)}"}
+        return {"error": str(e)}
 
-if __name__ == "__main__":
-    runpod.serverless.start({"handler": handler})
+runpod.serverless.start({"handler": handler})
