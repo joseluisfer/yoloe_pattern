@@ -7,7 +7,7 @@ from ultralytics import YOLO
 # -------------------------
 # Load model
 # -------------------------
-model = YOLO("/models/yoloe.pt")
+model = YOLO("/models/yoloe-26x-seg.pt")
 
 # -------------------------
 # Utils
