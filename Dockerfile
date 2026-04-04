@@ -1,23 +1,12 @@
-FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
+FROM python:3.10-slim-bookworm
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Instalación de librerías de sistema críticas para OpenCV/Ultralytics
-RUN apt-get update && apt-get install -y \
-    wget \
-    git \
-    libgl1 \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y wget git libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Instalación de Python
 COPY requirements.txt .
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Descarga del modelo
 RUN wget -q https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26x-seg.pt -O yoloe-26x-seg.pt
 
 COPY handler.py .
