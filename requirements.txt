@@ -1,9 +1,8 @@
 numpy<2.0.0
 runpod
 Pillow>=10.0.0
-requests
-pyyaml
 ultralytics>=8.3.40
+opencv-python-headless
 torch
 torchvision
 torchaudio --index-url https://download.pytorch.org/whl/cu121
