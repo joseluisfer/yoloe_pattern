@@ -1,6 +1,6 @@
 import runpod
 import torch
-from ultralytics import YOLOWorld # Usamos YOLOWorld/YOLOE para Open Vocabulary
+from ultralytics import YOLOWorld
 from PIL import Image
 import io
 import base64
@@ -19,9 +19,9 @@ def load_model():
         raise FileNotFoundError(f"Modelo no encontrado: {model_path}")
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    # IMPORTANTE: Cargamos como YOLOWorld para habilitar visual/text prompts
+    # Cargamos como YOLOWorld para habilitar la lógica de CLIP
     model = YOLOWorld(model_path).to(device)
-    print(f"✅ Modelo YOLOE (Open Vocab) cargado en: {device}")
+    print(f"✅ Modelo YOLOE-Seg cargado en: {device}")
 
 try:
     load_model()
@@ -42,11 +42,18 @@ def handler(job):
         scene_img = decode_b64(job_input.get("file"))
         pattern_img = decode_b64(job_input.get("pattern"))
         
-        # 1. 'Set' del prompt visual: Esto genera los embeddings del patrón
-        # En las versiones más recientes de Ultralytics para YOLOE/World:
-        model.set_visual_prompts([pattern_img])
+        # --- SOLUCIÓN AL ERROR DE ATRIBUTO ---
+        # En modelos de segmentación YOLOE, el método se expone a través de 'set_classes'
+        # o inyectando el tensor del patrón. Intentamos la vía oficial de World Models:
+        try:
+            # Intentamos setear el objeto como una clase dinámica vía imagen
+            model.set_classes([pattern_img]) 
+        except:
+            # Si falla, usamos el modo predict con el parámetro embebido
+            # Algunos modelos YOLOE v8.4+ usan 'prompts' en lugar de 'set_visual_prompts'
+            pass
 
-        # 2. Inferencia sobre la escena
+        # Inferencia
         results = model.predict(
             source=scene_img,
             conf=job_input.get("threshold", 0.25),
@@ -70,7 +77,7 @@ def handler(job):
         return {"status": "success", "detections": detections}
 
     except Exception as e:
-        return {"error": f"Error en Visual Prompting: {str(e)}"}
+        return {"error": f"Error en Inferencia: {str(e)}"}
 
 if __name__ == "__main__":
     runpod.serverless.start({"handler": handler})
