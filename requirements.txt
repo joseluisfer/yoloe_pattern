@@ -1,23 +1,24 @@
-# Forzamos NumPy 1.x para asegurar compatibilidad con Torch y Ultralytics 
+# --- COMPATIBILIDAD CRÍTICA ---
+# Forzamos la rama 1.x para evitar el error de ABI con Torch y OpenCV
 numpy<2.0.0
 
-# --- Núcleo de Ejecución ---
+# --- NÚCLEO DE RUNPOD Y UTILIDADES ---
 runpod
-ultralytics>=8.3.40
 Pillow>=10.0.0
+requests
+pyyaml
 
-# --- Motor de IA y Visión ---
-# Al fijar numpy<2, pip buscará versiones de torch compatibles con 1.x
+# --- MOTOR DE IA (YOLOE-26x + SEGMENTACIÓN) ---
+# Ultralytics maneja la arquitectura de YOLOv11/YOLOE
+ultralytics>=8.3.40
+# OpenCV sin GUI para servidores (evita errores de libGL)
+opencv-python-headless
+
+# --- DEEP LEARNING (CUDA 12.1) ---
 torch
 torchvision
 torchaudio --index-url https://download.pytorch.org/whl/cu121
 
-# --- Procesamiento de Contornos y Geometría ---
-opencv-python-headless
-
-# --- Modelos de Lenguaje-Visión ---
+# --- PROMPTING VISUAL (CLIP) ---
+# Necesario para que el modelo entienda el 'pattern' (imagen patrón)
 git+https://github.com/openai/CLIP.git
-
-# --- Utilidades Extra ---
-requests
-pyyaml
