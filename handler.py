@@ -4,52 +4,59 @@ import numpy as np
 import base64
 from io import BytesIO
 from PIL import Image
+from ultralytics import YOLO
+
+# Cargamos el modelo globalmente para que persista entre llamadas
+model = YOLO("/yoloe-26x-seg.pt")
 
 def decode_base64_image(base64_str):
     image_data = base64.b64decode(base64_str)
-    image = Image.open(BytesIO(image_data))
-    return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    image = Image.open(BytesIO(image_data)).convert('RGB')
+    return np.array(image)
 
 def handler(job):
     try:
         job_input = job['input']
-        
-        # 1. Obtener parámetros del JSON enviado por Android
         base64_scene = job_input.get('file')
-        base64_pattern = job_input.get('pattern')
-        threshold = job_input.get('conf', 0.5)
+        # El 'pattern' se recibe pero YOLO-E estándar no lo usa directamente para "buscar"
+        # base64_pattern = job_input.get('pattern') 
         
-        if not base64_scene or not base64_pattern:
-            return {"error": "Faltan imágenes de escena o patrón"}
+        conf_threshold = job_input.get('conf', 0.25)
+        iou_threshold = job_input.get('iou', 0.45)
+        imgsz = job_input.get('imgsz', 640)
 
-        # 2. Decodificar imágenes
+        if not base64_scene:
+            return {"error": "No se recibió la imagen de la escena"}
+
+        # 1. Preparar imagen
         scene_img = decode_base64_image(base64_scene)
-        pattern_img = decode_base64_image(base64_pattern)
-        
-        h, w = pattern_img.shape[:2]
 
-        # 3. Procesar: Template Matching (Detección de patrón)
-        # Nota: Para algo más avanzado usaríamos descriptores SIFT/ORB o YOLO-World
-        res = cv2.matchTemplate(scene_img, pattern_img, cv2.TM_CCOEFF_NORMED)
-        
-        # Filtrar por confianza (threshold)
-        loc = np.where(res >= threshold)
-        
+        # 2. Inferencia con YOLO-E
+        results = model.predict(
+            source=scene_img,
+            conf=conf_threshold,
+            iou=iou_threshold,
+            imgsz=imgsz,
+            save=False
+        )
+
+        # 3. Formatear resultados para el Android (JSONArray de bboxes)
         detections = []
-        # Agrupar puntos cercanos para evitar múltiples rectángulos en el mismo objeto
-        # (Simplificado para este ejemplo)
-        for pt in zip(*loc[::-1]):
-            detections.append({
-                "bbox": [
-                    int(pt[0]),           # x1
-                    int(pt[1]),           # y1
-                    int(pt[0] + w),       # x2
-                    int(pt[1] + h)        # y2
-                ],
-                "confidence": float(res[pt[1], pt[0]])
-            })
+        for r in results:
+            boxes = r.boxes.xyxy.cpu().numpy()  # Coordenadas [x1, y1, x2, y2]
+            scores = r.boxes.conf.cpu().numpy()
+            
+            for i in range(len(boxes)):
+                detections.append({
+                    "bbox": [
+                        float(boxes[i][0]), # x1
+                        float(boxes[i][1]), # y1
+                        float(boxes[i][2]), # x2
+                        float(boxes[i][3])  # y2
+                    ],
+                    "confidence": float(scores[i])
+                })
 
-        # Tu App Android busca "predictions" o "detections" dentro de "output"
         return {
             "predictions": detections,
             "count": len(detections)
@@ -58,5 +65,4 @@ def handler(job):
     except Exception as e:
         return {"error": str(e)}
 
-# Iniciar el servidor de RunPod
 runpod.serverless.start({"handler": handler})
