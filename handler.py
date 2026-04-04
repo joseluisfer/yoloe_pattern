@@ -1,80 +1,76 @@
 import runpod
 import torch
-from ultralytics import YOLOWorld # YOLOE usa la arquitectura World para prompts
 import numpy as np
+from ultralytics import YOLOWorld
 from PIL import Image
 import io
 import base64
+import requests
 
-# Carga global del modelo para persistencia
-print("Cargando YOLOE-26x-seg para Visual Prompting...")
+# Carga del modelo
 device = "0" if torch.cuda.is_available() else "cpu"
-# Cargamos como YOLOWorld porque soporta .query() para imágenes
 model = YOLOWorld("yoloe-26x-seg.pt").to(device)
 
-def decode_image(b64_str):
-    if "," in b64_str:
-        b64_str = b64_str.split(",")[1]
-    image_bytes = base64.b64decode(b64_str)
-    return Image.open(io.BytesIO(image_bytes)).convert("RGB")
+def get_image(source):
+    """Detecta si es Base64 o URL y devuelve una PIL Image"""
+    if source.startswith('http'):
+        response = requests.get(source, timeout=10)
+        return Image.open(io.BytesIO(response.content)).convert("RGB")
+    else:
+        if "," in source:
+            source = source.split(",")[1]
+        img_bytes = base64.b64decode(source)
+        return Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
 def handler(job):
     try:
-        job_input = job.get("input", {})
+        data = job.get("input", {})
         
-        # 1. Obtener entradas del JSON (según tu código Java/Kotlin)
-        base64_scene = job_input.get("file")
-        base64_pattern = job_input.get("pattern")
-        
-        # Parámetros con valores por defecto
-        conf_val = float(job_input.get("conf", 0.25))
-        iou_val = float(job_input.get("iou", 0.45))
-        img_size = int(job_input.get("imgsz", 1280))
+        # Mapeo exacto a tus campos de Java/Kotlin
+        base64_scene = data.get("file")
+        base64_pattern = data.get("pattern")
+        conf_thresh = float(data.get("conf", 0.25))
+        iou_thresh = float(data.get("iou", 0.45))
+        img_size = int(data.get("imgsz", 1280))
 
         if not base64_scene or not base64_pattern:
-            return {"error": "Se requieren 'file' (escena) y 'pattern' (imagen a buscar)"}
+            return {"error": "Faltan 'file' o 'pattern'"}
 
-        # 2. Preparar imágenes
-        scene_img = decode_image(base64_scene)
-        pattern_img = decode_image(base64_pattern)
+        # 1. Cargar imágenes
+        img_scene = get_image(base64_scene)
+        img_pattern = get_image(base64_pattern)
 
-        # 3. VISUAL PROMPTING 
-        # Seteamos el 'prompt' usando la imagen patrón
-        model.set_classes([pattern_img]) 
+        # 2. VISUAL PROMPTING: Usar la imagen como clase
+        # Importante: YOLO-World v8.4 acepta una lista de imágenes para set_classes
+        model.set_classes([img_pattern])
 
-        # 4. Inferencia en la escena
+        # 3. Inferencia
         results = model.predict(
-            np.array(scene_img),
-            conf=conf_val,
-            iou=iou_val,
+            np.array(img_scene),
+            conf=conf_thresh,
+            iou=iou_thresh,
             imgsz=img_size,
             verbose=False
         )
 
-        # 5. Procesar resultados (Detecciones + Segmentación si existe)
+        # 4. Formatear salida
         detections = []
         if results and len(results) > 0:
-            res = results[0]
-            if res.boxes:
-                for i in range(len(res.boxes)):
-                    box = res.boxes[i]
-                    det = {
-                        "confidence": round(float(box.conf[0]), 4),
-                        "bbox": [round(float(x), 2) for x in box.xyxy[0].tolist()],
-                    }
-                    # Si el modelo devuelve máscaras de segmentación
-                    if res.masks:
-                        det["segments"] = res.masks[i].xyn[0].tolist() # Coordenadas normalizadas
-                    
-                    detections.append(det)
+            r = results[0]
+            for i in range(len(r.boxes)):
+                box = r.boxes[i]
+                d = {
+                    "confidence": float(box.conf[0]),
+                    "bbox": [float(x) for x in box.xyxy[0].tolist()]
+                }
+                if r.masks:
+                    # Devolvemos los puntos de la segmentación (normalizados 0-1)
+                    d["segments"] = r.masks[i].xyn[0].tolist()
+                detections.append(d)
 
-        return {
-            "status": "success",
-            "detections": detections,
-            "count": len(detections)
-        }
+        return {"detections": detections}
 
     except Exception as e:
-        return {"error": f"Error en el worker: {str(e)}"}
+        return {"error": str(e)}
 
 runpod.serverless.start({"handler": handler})
