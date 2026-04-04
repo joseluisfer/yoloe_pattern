@@ -13,9 +13,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY handler.py .
 
+# -------------------------
+# Descargar modelo (mejor source)
+# -------------------------
 RUN mkdir -p /models
 WORKDIR /models
-RUN wget -O yoloe.pt https://huggingface.co/ultralytics/yoloe/resolve/main/yoloe-26x-seg.pt
+RUN wget https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26x-seg.pt -O yoloe-26x-seg.pt
 
 WORKDIR /app
 
