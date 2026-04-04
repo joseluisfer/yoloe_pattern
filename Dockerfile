@@ -1,10 +1,8 @@
 FROM pytorch/pytorch:2.2.1-cuda12.1-cudnn8-runtime
 
-ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
-    git \
     wget \
     libgl1 \
     libglib2.0-0 \
