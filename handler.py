@@ -1,12 +1,12 @@
 import runpod
 import torch
-from ultralytics import YOLOE
+from ultralytics import YOLOWorld # Usamos YOLOWorld/YOLOE para Open Vocabulary
 from PIL import Image
 import io
 import base64
 import os
 
-# Optimizaciones para arquitectura Blackwell (RTX 5090)
+# Optimización RTX 5090
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.benchmark = True
 
@@ -19,9 +19,9 @@ def load_model():
         raise FileNotFoundError(f"Modelo no encontrado: {model_path}")
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    # Cargamos el modelo
-    model = YOLOE(model_path).to(device)
-    print(f"✅ YOLOE cargado en: {device}")
+    # IMPORTANTE: Cargamos como YOLOWorld para habilitar visual/text prompts
+    model = YOLOWorld(model_path).to(device)
+    print(f"✅ Modelo YOLOE (Open Vocab) cargado en: {device}")
 
 try:
     load_model()
@@ -42,12 +42,15 @@ def handler(job):
         scene_img = decode_b64(job_input.get("file"))
         pattern_img = decode_b64(job_input.get("pattern"))
         
-        # Inferencia con Visual Prompt (Detección de objeto patrón)
+        # 1. 'Set' del prompt visual: Esto genera los embeddings del patrón
+        # En las versiones más recientes de Ultralytics para YOLOE/World:
+        model.set_visual_prompts([pattern_img])
+
+        # 2. Inferencia sobre la escena
         results = model.predict(
             source=scene_img,
-            visual_prompt=pattern_img,
             conf=job_input.get("threshold", 0.25),
-            imgsz=640, # Puedes subirlo a 1024 para más precisión en la 5090
+            imgsz=640,
             verbose=False
         )
 
@@ -55,7 +58,6 @@ def handler(job):
         if results:
             res = results[0]
             if res.boxes:
-                # Extraemos solo lo necesario: Box y Score
                 boxes = res.boxes.xyxy.cpu().numpy()
                 confs = res.boxes.conf.cpu().numpy()
                 
@@ -68,7 +70,7 @@ def handler(job):
         return {"status": "success", "detections": detections}
 
     except Exception as e:
-        return {"error": f"Error en inferencia: {str(e)}"}
+        return {"error": f"Error en Visual Prompting: {str(e)}"}
 
 if __name__ == "__main__":
     runpod.serverless.start({"handler": handler})
