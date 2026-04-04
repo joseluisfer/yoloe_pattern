@@ -1,24 +1,10 @@
-# --- COMPATIBILIDAD CRÍTICA ---
-# Forzamos la rama 1.x para evitar el error de ABI con Torch y OpenCV
 numpy<2.0.0
-
-# --- NÚCLEO DE RUNPOD Y UTILIDADES ---
 runpod
 Pillow>=10.0.0
 requests
 pyyaml
-
-# --- MOTOR DE IA (YOLOE-26x + SEGMENTACIÓN) ---
-# Ultralytics maneja la arquitectura de YOLOv11/YOLOE
 ultralytics>=8.3.40
-# OpenCV sin GUI para servidores (evita errores de libGL)
-opencv-python-headless
-
-# --- DEEP LEARNING (CUDA 12.1) ---
 torch
 torchvision
 torchaudio --index-url https://download.pytorch.org/whl/cu121
-
-# --- PROMPTING VISUAL (CLIP) ---
-# Necesario para que el modelo entienda el 'pattern' (imagen patrón)
 git+https://github.com/openai/CLIP.git
