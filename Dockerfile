@@ -1,14 +1,15 @@
-# Usamos la imagen oficial que ya tiene Python, PyTorch y OpenCV configurados
+# Usamos la imagen que ya tiene todo configurado para YOLOv8/YOLO-E
 FROM ultralytics/ultralytics:latest
 
-# Instalamos runpod para el servidor serverless
+WORKDIR /app
+
+# Instalar runpod
 RUN pip install --no-cache-dir runpod
 
-# Descargamos el modelo específico para que ya esté dentro de la imagen (más rápido al arrancar)
-RUN curl -L https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26x-seg.pt -o /yoloe-26x-seg.pt
+# Descargar el modelo YOLO-E que pediste
+RUN curl -L https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26x-seg.pt -o /app/yoloe-26x-seg.pt
 
-# Copiamos el handler
-COPY handler.py /handler.py
+# Copiar el script
+COPY handler.py .
 
-# Ejecutamos el handler
-CMD [ "python", "-u", "/handler.py" ]
+CMD [ "python", "-u", "handler.py" ]
