@@ -1,10 +1,13 @@
+# Forzamos NumPy 1.x para asegurar compatibilidad con Torch y Ultralytics 
+numpy<2.0.0
+
 # --- Núcleo de Ejecución ---
 runpod
 ultralytics>=8.3.40
-numpy>=1.23.5
 Pillow>=10.0.0
 
 # --- Motor de IA y Visión ---
+# Al fijar numpy<2, pip buscará versiones de torch compatibles con 1.x
 torch
 torchvision
 torchaudio --index-url https://download.pytorch.org/whl/cu121
@@ -12,8 +15,7 @@ torchaudio --index-url https://download.pytorch.org/whl/cu121
 # --- Procesamiento de Contornos y Geometría ---
 opencv-python-headless
 
-# --- Modelos de Lenguaje-Visión (Indispensable para Visual Prompting) ---
-# Instalación directa desde el repositorio oficial de OpenAI
+# --- Modelos de Lenguaje-Visión ---
 git+https://github.com/openai/CLIP.git
 
 # --- Utilidades Extra ---
