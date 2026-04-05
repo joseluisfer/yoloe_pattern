@@ -1,87 +1,151 @@
 import runpod
-import cv2
-import numpy as np
-import base64
 import torch
-from io import BytesIO
+import numpy as np
 from PIL import Image
-from ultralytics import YOLO
+import io
+import base64
+from ultralytics import YOLOE
+from ultralytics.models.yolo.yoloe import YOLOEVPSegPredictor
 
-# Cargamos el modelo YOLO-E (Segmentación)
-# Este modelo nos servirá como extractor de características
-model = YOLO("/app/yoloe-26x-seg.pt")
+print("=" * 60)
+print("Iniciando YOLOE Visual Prompt Worker")
+print("=" * 60)
 
-def decode_base64_image(base64_str):
-    image_data = base64.b64decode(base64_str)
-    image = Image.open(BytesIO(image_data)).convert('RGB')
-    return np.array(image)
+# Configurar dispositivo
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+print(f"✅ Dispositivo: {device}")
+if device == "cuda:0":
+    print(f"   GPU: {torch.cuda.get_device_name(0)}")
 
-def get_embedding(img):
-    """Extrae el vector de características (embedding) de una imagen usando YOLO."""
-    # Hacemos una predicción y obtenemos los features de la última capa antes de la clasificación
-    results = model.predict(img, imgsz=640, save=False, verbose=False)
-    # Extraemos el embedding (proceso simplificado usando los resultados del modelo)
-    # En modelos de segmentación, usamos el vector global de las cajas detectadas
-    if len(results) > 0 and results[0].boxes:
-        # Tomamos el embedding del objeto con mayor confianza
-        return results[0].boxes[0].data # Esto es un ejemplo, en prod se usa model.embed()
-    return None
+# Cargar modelo
+print("📦 Cargando modelo YOLOE-26x-seg...")
+model = YOLOE("yoloe-26x-seg.pt")
+model.to(device)
+print("✅ Modelo cargado exitosamente")
+
+def decode_image(b64_string):
+    """Decodifica base64 a imagen PIL RGB"""
+    if "," in b64_string:
+        b64_string = b64_string.split(",")[1]
+    image_bytes = base64.b64decode(b64_string)
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    return img
 
 def handler(job):
-    try:
-        job_input = job['input']
-        scene_b64 = job_input.get('file')
-        pattern_b64 = job_input.get('pattern')
-        conf_threshold = job_input.get('conf', 0.25)
-        
-        if not scene_b64 or not pattern_b64:
-            return {"error": "Se requiere escena y patrón"}
-
-        # 1. Decodificar
-        scene_img = decode_base64_image(scene_b64)
-        pattern_img = decode_base64_image(pattern_b64)
-
-        # 2. Obtener el "ADN visual" del patrón (Visual Prompt)
-        # Usamos crop=True para que YOLO se enfoque solo en esa imagen pequeña
-        pattern_results = model.predict(pattern_img, imgsz=320, save=False)
-        if not pattern_results[0].boxes:
-            return {"error": "No se pudo identificar el objeto en el patrón"}
-        
-        # Obtenemos el vector del patrón
-        pattern_embedding = pattern_results[0].boxes.data[0] # Simplificación
-
-        # 3. Detectar todo en la escena
-        scene_results = model.predict(scene_img, conf=0.1, imgsz=640)
-        
-        final_detections = []
-        
-        # 4. Comparar cada detección de la escena contra el patrón
-        for r in scene_results:
-            boxes = r.boxes.xyxy.cpu().numpy()
-            scores = r.boxes.conf.cpu().numpy()
-            classes = r.boxes.cls.cpu().numpy()
-
-            for i in range(len(boxes)):
-                # Aquí es donde ocurre la magia de "Visual Prompting":
-                # En un entorno real de Ultralytics Explorer, compararíamos vectores.
-                # Como estamos en un script, usaremos la clase detectada y la confianza
-                # para filtrar lo que el usuario seleccionó.
-                
-                # Para este ejemplo, devolvemos las detecciones que YOLO considera relevantes
-                # basándose en el entrenamiento de YOLO-E.
-                final_detections.append({
-                    "bbox": [float(boxes[i][0]), float(boxes[i][1]), 
-                             float(boxes[i][2]), float(boxes[i][3])],
-                    "confidence": float(scores[i]),
-                    "class": int(classes[i])
-                })
-
-        return {
-            "predictions": final_detections,
-            "count": len(final_detections)
+    """
+    Handler para visual prompting con YOLOE
+    
+    Input esperado:
+    {
+        "input": {
+            "file": "base64_imagen_donde_buscar",
+            "pattern": "base64_imagen_de_referencia",
+            "bbox": [x1, y1, x2, y2],  # opcional: bbox del objeto en pattern
+            "conf": 0.25,
+            "iou": 0.45,
+            "imgsz": 640
         }
-
+    }
+    """
+    try:
+        inp = job.get("input", {})
+        
+        # Obtener imágenes con tus nombres de campo
+        target_b64 = inp.get("file")      # imagen donde buscar
+        pattern_b64 = inp.get("pattern")  # imagen de referencia (lo que buscamos)
+        
+        # Parámetros opcionales
+        conf_threshold = float(inp.get("conf", 0.25))
+        iou_threshold = float(inp.get("iou", 0.45))
+        imgsz = int(inp.get("imgsz", 640))
+        
+        # Bounding box opcional en la imagen pattern
+        custom_bbox = inp.get("bbox", None)
+        
+        if not target_b64:
+            return {"error": "Falta 'file' (imagen donde buscar)"}
+        
+        if not pattern_b64:
+            return {"error": "Falta 'pattern' (imagen de referencia)"}
+        
+        # Decodificar imágenes
+        target_img = decode_image(target_b64)
+        pattern_img = decode_image(pattern_b64)
+        
+        print(f"📐 Target size (file): {target_img.size}")
+        print(f"📐 Pattern size (pattern): {pattern_img.size}")
+        
+        # Si no se proporciona bbox, usar toda la imagen pattern como referencia
+        if custom_bbox:
+            bboxes = np.array([custom_bbox], dtype=np.float32)
+            print(f"📦 Usando bbox personalizado: {custom_bbox}")
+        else:
+            # Usar toda la imagen pattern como referencia
+            w, h = pattern_img.size
+            bboxes = np.array([[0, 0, w, h]], dtype=np.float32)
+            print(f"📦 Usando pattern completo: {w}x{h}")
+        
+        # Configurar visual prompts según documentación oficial
+        # IMPORTANTE: cls debe ser secuencial empezando desde 0
+        visual_prompts = dict(
+            bboxes=bboxes,
+            cls=np.array([0])  # ID 0 para el objeto a buscar
+        )
+        
+        print(f"🎯 Visual prompt configurado con {len(bboxes)} bounding box(es)")
+        print(f"🔍 Parámetros: conf={conf_threshold}, iou={iou_threshold}, imgsz={imgsz}")
+        
+        # Ejecutar inferencia con visual prompt
+        results = model.predict(
+            target_img,
+            refer_image=pattern_img,  # Imagen de referencia (pattern)
+            visual_prompts=visual_prompts,
+            predictor=YOLOEVPSegPredictor,
+            conf=conf_threshold,
+            iou=iou_threshold,
+            imgsz=imgsz,
+            verbose=False
+        )
+        
+        # Procesar resultados
+        detections = []
+        if results and len(results) > 0:
+            res = results[0]
+            if res.boxes:
+                boxes = res.boxes.xyxy.cpu().numpy()
+                confs = res.boxes.conf.cpu().numpy()
+                
+                for i, (box, conf) in enumerate(zip(boxes, confs)):
+                    detections.append({
+                        "bbox": [float(x) for x in box],
+                        "confidence": float(conf)
+                    })
+                    
+                    # Incluir máscara si está disponible
+                    if hasattr(res, 'masks') and res.masks is not None:
+                        mask = res.masks.data[i].cpu().numpy()
+                        mask_b64 = base64.b64encode(mask.tobytes()).decode('utf-8')
+                        detections[-1]["mask"] = mask_b64
+        
+        print(f"✅ Encontradas {len(detections)} detecciones")
+        
+        return {
+            "success": True,
+            "detections": detections,
+            "count": len(detections),
+            "params_used": {
+                "conf": conf_threshold,
+                "iou": iou_threshold,
+                "imgsz": imgsz
+            },
+            "device": device
+        }
+        
     except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {"error": str(e)}
 
+# Iniciar worker
 runpod.serverless.start({"handler": handler})
