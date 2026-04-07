@@ -25,6 +25,6 @@ def handler(job):
         predictor=YOLOEVPSegPredictor
     )
 
-    return {"status": "success", "summary": results[0].tojson()}
+    return {"status": "success", "summary": results[0].to_json()}
 
 runpod.serverless.start({"handler": handler})
