@@ -1,38 +1,27 @@
-FROM runpod/base:0.6.3-cuda11.8.0
+FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
 
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Instalamos dependencias de sistema para OpenCV y procesamiento de imagen
 RUN apt-get update && apt-get install -y \
+    wget \
+    git \
     libgl1 \
     libglib2.0-0 \
-    wget \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Instalar Python packages con verbose
-RUN pip3 install --verbose --no-cache-dir \
-    torch==2.0.1 \
-    torchvision==0.15.2 \
-    --index-url https://download.pytorch.org/whl/cu118
+# Instalamos requerimientos de Python
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-RUN pip3 install --verbose --no-cache-dir \
-    numpy==1.23.5
+# Descarga oficial del modelo YOLOE-26x-seg
+RUN wget -q https://github.com/ultralytics/assets/releases/download/v8.3.0/yoloe-26x-seg.pt -O yoloe-26x-seg.pt
 
-RUN pip3 install --verbose --no-cache-dir \
-    ultralytics==8.3.40
-
-RUN pip3 install --verbose --no-cache-dir \
-    runpod \
-    pillow \
-    opencv-python-headless
-
-# VERIFICAR instalación
-RUN python3 -c "import runpod; print('✅ runpod instalado correctamente')"
-RUN python3 -c "import torch; print(f'✅ torch version: {torch.__version__}')"
-RUN python3 -c "import ultralytics; print(f'✅ ultralytics version: {ultralytics.__version__}')"
-
-# Descargar modelo
-RUN wget -q https://github.com/ultralytics/assets/releases/download/v8.4.0/yoloe-26x-seg.pt -O yoloe-26x-seg.pt
-
+# Copiamos el código del worker
 COPY handler.py .
 
-CMD ["python3", "-u", "handler.py"]
+# Ejecutamos el handler en modo unbuffered para ver los logs en tiempo real
+CMD ["python", "-u", "handler.py"]
