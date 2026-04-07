@@ -1,8 +1,4 @@
-numpy<2.0.0
+ultralytics>=8.3.0
 runpod
-Pillow>=10.0.0
-ultralytics>=8.3.50
+numpy
 opencv-python-headless
-torch
-torchvision
-torchaudio --index-url https://download.pytorch.org/whl/cu121
