@@ -1,82 +1,30 @@
 import runpod
-import torch
+import numpy as np
 from ultralytics import YOLO
-from PIL import Image
-import io
-import base64
-import os
+from ultralytics.models.yolo.yoloe import YOLOEVPSegPredictor
 
-# Optimización RTX 5090
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.benchmark = True
-
-model = None
-
-def load_model():
-    global model
-    model_path = "yolo26x-seg.pt"
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    # Cargamos el modelo
-    model = YOLO(model_path).to(device)
-    print(f"✅ YOLOE-26x-Seg cargado en: {device}")
-
-try:
-    load_model()
-except Exception as e:
-    print(f"❌ Error carga: {e}")
-
-def decode_b64(b64_str):
-    if b64_str and "," in b64_str:
-        b64_str = b64_str.split(",")[1]
-    # Limpieza básica para evitar el error de "broken PNG"
-    b64_str = b64_str.replace("\n", "").replace("\r", "").strip()
-    return Image.open(io.BytesIO(base64.b64decode(b64_str))).convert("RGB")
+# Carga del modelo global para optimizar "warm starts"
+model = YOLO("yoloe-26x-seg.pt")
 
 def handler(job):
-    if model is None: return {"error": "Modelo no listo"}
+    input_data = job["input"]
+    target_img = input_data.get("image")        # Imagen donde buscar
+    ref_img = input_data.get("ref_image")      # Imagen de referencia
+    bboxes = input_data.get("bboxes")          # Ejemplo: [[x1, y1, x2, y2]]
+    
+    # Configuración de prompts visuales
+    visual_prompts = dict(
+        bboxes=np.array(bboxes),
+        cls=np.array([i for i in range(len(bboxes))])
+    )
 
-    try:
-        job_input = job.get("input", {})
-        scene_img = decode_b64(job_input.get("file"))
-        pattern_img = decode_b64(job_input.get("pattern"))
-        
-        # --- SOLUCIÓN DEFINITIVA ---
-        # En los modelos YOLO26/YOLOE de segmentación, el visual_prompt 
-        # se pasa dentro del predict, pero DEBE ser una lista o un tensor.
-        results = model.predict(
-            source=scene_img,
-            visual_prompt=pattern_img, # La documentación indica que acepta la imagen aquí
-            conf=job_input.get("threshold", 0.25),
-            imgsz=640,
-            verbose=False
-        )
+    results = model.predict(
+        source=target_img,
+        refer_image=ref_img,
+        visual_prompts=visual_prompts,
+        predictor=YOLOEVPSegPredictor
+    )
 
-        detections = []
-        if results:
-            res = results[0]
-            if res.boxes:
-                boxes = res.boxes.xyxy.cpu().numpy()
-                confs = res.boxes.conf.cpu().numpy()
-                
-                for i in range(len(boxes)):
-                    detections.append({
-                        "bbox": [round(float(x), 1) for x in boxes[i]],
-                        "confidence": round(float(confs[i]), 3)
-                    })
+    return {"status": "success", "summary": results[0].tojson()}
 
-        return {"status": "success", "detections": detections}
-
-    except Exception as e:
-        # Si el error 'visual_prompt' vuelve a aparecer, usamos el plan B: 
-        # Inyectar el prompt en el modelo de forma manual antes del predict
-        try:
-            model.model.set_visual_prompts([pattern_img])
-            results = model.predict(source=scene_img, conf=0.25, verbose=False)
-            # ... (resto del procesado igual)
-            return {"status": "success", "detections": "Plan B ejecutado"}
-        except:
-            return {"error": f"Error persistente: {str(e)}"}
-
-if __name__ == "__main__":
-    runpod.serverless.start({"handler": handler})
+runpod.serverless.start({"handler": handler})
