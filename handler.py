@@ -1,20 +1,3 @@
-You: quiero un handler.py. un dockerfile y un requirement.txt para un endpoint serverless de runpod que use yoloe-26x-seg.pt para visual prompting, detectar imagenes dentro de imagenes.
-
----
-
-Ultralytics AI: Para crear un endpoint serverless en RunPod usando **Ultralytics YOLO26** (modelo YOLOE-26x-seg) para visual prompting, necesitas configurar un handler que procese la imagen de referencia y la imagen objetivo.
-
-### 1. `requirements.txt`
-```text
-ultralytics>=8.3.0
-runpod
-numpy
-opencv-python-headless
-```
-
-### 2. `handler.py`
-Este script utiliza `YOLOEVPSegPredictor` para procesar **visual prompts**.
-```python
 import runpod
 import numpy as np
 from ultralytics import YOLO
