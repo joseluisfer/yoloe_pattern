@@ -1,7 +1,11 @@
-torch==2.0.1
-torchvision==0.15.2
-numpy==1.23.5
-ultralytics>=8.3.40
+numpy<2.0.0
 runpod
-pillow
+Pillow>=10.0.0
+# Versión que asegura soporte estable para YOLOE Visual Prompting
+ultralytics==8.3.59 
 opencv-python-headless
+torch
+torchvision
+torchaudio --index-url https://download.pytorch.org/whl/cu121
+# CLIP es el motor que traduce la imagen patrón en un "concepto" para YOLOE
+git+https://github.com/openai/CLIP.git
