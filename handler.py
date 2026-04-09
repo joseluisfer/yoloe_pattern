@@ -2,69 +2,90 @@ import runpod
 import numpy as np
 import base64
 import cv2
-import os
+import requests
 from ultralytics import YOLO
 from ultralytics.models.yolo.yoloe import YOLOEVPSegPredictor
 
-# Cargar el modelo YOLO26 (recomendado) o YOLO11
+# Carga del modelo (una sola vez)
 model = YOLO("yoloe-26x-seg.pt")
 
-def process_input(data):
-    """Detecta si el input es una ruta de archivo o base64 y lo procesa."""
-    if isinstance(data, str):
-        # Si es una ruta de archivo local existente (.jpg, .png, etc.)
-        if os.path.exists(data):
-            return data
-        # Si es base64, decodificar a imagen de OpenCV (numpy array)
-        try:
-            nparr = np.frombuffer(base64.b64decode(data), np.uint8)
-            return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        except Exception:
-            return data
-    return data
+# -------------------------
+# Loader (base64 o URL)
+# -------------------------
+def load_image(data):
+    if not isinstance(data, str):
+        raise ValueError("Input must be string")
 
-def handler(job):
-    input_data = job["input"]
-    
-    # Procesar imagen principal y de referencia
-    img = process_input(input_data["file"])
-    ref_img = process_input(input_data["pattern"])
-    
-    # Obtener dimensiones para el prompt visual (si ref_img es array)
-    if isinstance(ref_img, np.ndarray):
-        h, w = ref_img.shape[:2]
+    # URL
+    if data.startswith("http"):
+        resp = requests.get(data)
+        img_array = np.frombuffer(resp.content, np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
     else:
-        # Si es ruta, cargamos temporalmente para obtener dimensiones
-        temp_img = cv2.imread(ref_img)
-        h, w = temp_img.shape[:2]
+        # limpiar base64 tipo data:image/jpeg;base64,...
+        if data.startswith("data:image"):
+            data = data.split(",")[1]
 
-    # Definir visual_prompts según la referencia de YOLOE
-    # https://docs.ultralytics.com/reference/models/yolo/model/
-    visual_prompts = dict(
-        bboxes=np.array([[0, 0, w, h]]), 
-        cls=np.array([0])
-    )
+        img_bytes = base64.b64decode(data)
+        img_array = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
-    results = model.predict(
-        source=img,
-        refer_image=ref_img,
-        visual_prompts=visual_prompts,
-        predictor=YOLOEVPSegPredictor,
-        conf=input_data.get("conf", 0.25),
-        iou=input_data.get("iou", 0.45),
-        imgsz=input_data.get("imgsz", 1280)
-    )
+    if img is None:
+        raise ValueError("Image decode failed")
 
-    # Formatear resultados
-    detections = []
-    for res in results[0].summary():
-        detections.append({
-            "name": res["name"],
-            "bbox": res["box"],
-            "confidence": res["confidence"]
-        })
+    return img
 
-    return {"status": "success", "detections": detections}
+# -------------------------
+# Handler
+# -------------------------
+def handler(job):
+    try:
+        input_data = job["input"]
 
-if __name__ == "__main__":
-    runpod.serverless.start({"handler": handler})
+        # 🔹 imagen grande + patrón visual
+        img = load_image(input_data["file"])
+        ref_img = load_image(input_data["pattern"])
+
+        # 🔹 dimensiones del patrón
+        h, w = ref_img.shape[:2]
+
+        # 🔹 visual prompt (imagen completa como referencia)
+        visual_prompts = dict(
+            bboxes=np.array([[0, 0, w, h]]),
+            cls=np.array([0])
+        )
+
+        # 🔹 inferencia
+        results = model.predict(
+            source=img,
+            refer_image=ref_img,
+            visual_prompts=visual_prompts,
+            predictor=YOLOEVPSegPredictor,
+            conf=input_data.get("conf", 0.10),   # 👈 clave para etiquetas
+            iou=input_data.get("iou", 0.45),
+            imgsz=input_data.get("imgsz", 1536)  # 👈 clave para objetos pequeños
+        )
+
+        detections = []
+
+        if len(results) > 0:
+            for res in results[0].summary():
+                detections.append({
+                    "bbox": res["box"],
+                    "confidence": res["confidence"]
+                })
+
+        return {
+            "status": "success",
+            "count": len(detections),
+            "detections": detections
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+# -------------------------
+# RunPod
+# -------------------------
+runpod.serverless.start({"handler": handler})
